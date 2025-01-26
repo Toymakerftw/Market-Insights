@@ -4,6 +4,8 @@ import pandas as pd
 import torch
 from GoogleNews import GoogleNews
 from transformers import pipeline
+import requests
+from bs4 import BeautifulSoup
 
 # Set up logging
 logging.basicConfig(
@@ -24,7 +26,6 @@ sentiment_analyzer = pipeline(
 logging.info("Model initialized successfully")
 
 def fetch_articles(query):
-    """Fetch articles from Google News based on the query."""
     try:
         logging.info(f"Fetching articles for query: '{query}'")
         googlenews = GoogleNews(lang="en")
@@ -42,14 +43,28 @@ def fetch_articles(query):
         )
 
 def analyze_article_sentiment(article):
-    """Analyze the sentiment of a single article."""
     logging.info(f"Analyzing sentiment for article: {article['title']}")
     sentiment = sentiment_analyzer(article["desc"])[0]
     article["sentiment"] = sentiment
     return article
 
+def scrape_google_finance(ticker):
+    url = f"https://www.google.com/finance/quote/{ticker}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.134 Safari/537.36"
+    }
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.content, "html.parser")
+
+    # Extract relevant data
+    stock_data = {}
+    stock_data["price"] = soup.find("div", class_="YMlKec fxKbKc").text
+    stock_data["change"] = soup.find("div", class_="JwB6zf").text
+    stock_data["percent_change"] = soup.find("div", class_="Iap8Fd").text
+
+    return stock_data
+
 def analyze_asset_sentiment(asset_name):
-    """Analyze the sentiment of news articles related to a trading asset."""
     logging.info(f"Starting sentiment analysis for asset: {asset_name}")
 
     logging.info("Fetching articles")
@@ -58,12 +73,14 @@ def analyze_asset_sentiment(asset_name):
     logging.info("Analyzing sentiment of each article")
     analyzed_articles = [analyze_article_sentiment(article) for article in articles]
 
+    logging.info("Scraping Google Finance data")
+    finance_data = scrape_google_finance(asset_name)
+
     logging.info("Sentiment analysis completed")
 
-    return convert_to_dataframe(analyzed_articles)
+    return convert_to_dataframe(analyzed_articles), finance_data
 
 def convert_to_dataframe(analyzed_articles):
-    """Convert the list of analyzed articles to a DataFrame."""
     df = pd.DataFrame(analyzed_articles)
     df["Title"] = df.apply(
         lambda row: f'<a href="{row["link"]}" target="_blank">{row["title"]}</a>',
@@ -120,10 +137,16 @@ with gr.Blocks() as iface:
                     wrap=False,
                 )
 
+    with gr.Row():
+        with gr.Column():
+            with gr.Blocks():
+                gr.Markdown("## Financial Data")
+                finance_output = gr.JSON()
+
     analyze_button.click(
         analyze_asset_sentiment,
         inputs=[input_asset],
-        outputs=[articles_output],
+        outputs=[articles_output, finance_output],
     )
 
 logging.info("Launching Gradio interface")
