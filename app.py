@@ -58,9 +58,24 @@ def scrape_google_finance(ticker):
 
     # Extract relevant data
     stock_data = {}
-    stock_data["price"] = soup.find("div", class_="YMlKec fxKbKc").text
-    stock_data["change"] = soup.find("div", class_="JwB6zf").text
-    stock_data["percent_change"] = soup.find("div", class_="Iap8Fd").text
+    price_div = soup.find("div", class_="YMlKec fxKbKc")
+    change_div = soup.find("div", class_="JwB6zf")
+    percent_change_div = soup.find("div", class_="Iap8Fd")
+
+    if price_div:
+        stock_data["price"] = price_div.text
+    else:
+        stock_data["price"] = "N/A"
+
+    if change_div:
+        stock_data["change"] = change_div.text
+    else:
+        stock_data["change"] = "N/A"
+
+    if percent_change_div:
+        stock_data["percent_change"] = percent_change_div.text
+    else:
+        stock_data["percent_change"] = "N/A"
 
     return stock_data
 
