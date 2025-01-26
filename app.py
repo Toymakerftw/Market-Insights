@@ -5,6 +5,8 @@ import torch
 from GoogleNews import GoogleNews
 from transformers import pipeline
 import yfinance as yf
+import requests
+from fuzzywuzzy import process
 
 # Set up logging
 logging.basicConfig(
@@ -23,6 +25,42 @@ sentiment_analyzer = pipeline(
     "sentiment-analysis", model=SENTIMENT_ANALYSIS_MODEL, device=DEVICE
 )
 logging.info("Model initialized successfully")
+
+# Exchange suffixes for Yahoo Finance
+EXCHANGE_SUFFIXES = {
+    "NSE": ".NS",
+    "BSE": ".BO",
+    "NYSE": "",
+    "NASDAQ": "",
+    # Add more exchanges as needed
+}
+
+def resolve_ticker_symbol(query: str, exchange: str = "NSE") -> str:
+    """
+    Convert company names/partial symbols to valid Yahoo Finance tickers.
+    Example: "Kalyan Jewellers" → "KALYANKJIL.NS"
+    """
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+    headers = {"User-Agent": "Mozilla/5.0"}  # Avoid blocking
+    params = {"q": query, "quotesCount": 5, "country": "India"}  # Adjust for regional markets
+    
+    response = requests.get(url, headers=headers, params=params)
+    data = response.json()
+    
+    if data.get("quotes"):
+        # Extract symbols and names
+        tickers = [quote["symbol"] for quote in data["quotes"]]
+        names = [quote["longname"] or quote["shortname"] for quote in data["quotes"]]
+        
+        # Fuzzy match the query with company names
+        best_match = process.extractOne(query, names)
+        if best_match:
+            index = names.index(best_match[0])
+            return tickers[index] + EXCHANGE_SUFFIXES.get(exchange, "")
+        else:
+            return tickers[0] + EXCHANGE_SUFFIXES.get(exchange, "")  # Default to first result
+    else:
+        raise ValueError(f"No ticker found for: {query}")
 
 def fetch_articles(query):
     try:
@@ -117,20 +155,30 @@ def _format_number(num):
         return f"{num:,.2f}P"
     return num
 
-def analyze_asset_sentiment(asset_name):
-    logging.info(f"Starting sentiment analysis for asset: {asset_name}")
+def analyze_asset_sentiment(asset_input):
+    logging.info(f"Starting sentiment analysis for asset: {asset_input}")
 
-    logging.info("Fetching articles")
-    articles = fetch_articles(asset_name)
+    try:
+        # Resolve ticker symbol from user input
+        ticker = resolve_ticker_symbol(asset_input)
+        logging.info(f"Resolved '{asset_input}' to ticker: {ticker}")
 
-    logging.info("Analyzing sentiment of each article")
-    analyzed_articles = [analyze_article_sentiment(article) for article in articles]
+        # Fetch articles and analyze sentiment
+        logging.info("Fetching articles")
+        articles = fetch_articles(asset_input)
 
-    logging.info("Fetching Yahoo Finance data")
-    finance_data = fetch_yfinance_data(asset_name)
+        logging.info("Analyzing sentiment of each article")
+        analyzed_articles = [analyze_article_sentiment(article) for article in articles]
 
-    logging.info("Sentiment analysis completed")
-    return convert_to_dataframe(analyzed_articles), finance_data
+        # Fetch Yahoo Finance data
+        logging.info("Fetching Yahoo Finance data")
+        finance_data = fetch_yfinance_data(ticker)
+
+        logging.info("Sentiment analysis completed")
+        return convert_to_dataframe(analyzed_articles), finance_data
+    except ValueError as e:
+        logging.error(f"Error resolving ticker: {str(e)}")
+        raise gr.Error(f"Invalid input: {str(e)}")
 
 def convert_to_dataframe(analyzed_articles):
     df = pd.DataFrame(analyzed_articles)
@@ -161,9 +209,9 @@ with gr.Blocks() as iface:
 
     with gr.Row():
         input_asset = gr.Textbox(
-            label="Asset Ticker Symbol",
+            label="Asset Name or Ticker Symbol",
             lines=1,
-            placeholder="Enter the ticker symbol (e.g., AAPL, TSLA, BTC-USD)...",
+            placeholder="Enter the company name or ticker symbol (e.g., Kalyan Jewellers, AAPL, TSLA)...",
         )
 
     with gr.Row():
@@ -173,7 +221,7 @@ with gr.Blocks() as iface:
         examples=[
             "AAPL",
             "TSLA",
-            "AMZN",
+            "Kalyan Jewellers",
             "BTC-USD"
         ],
         inputs=input_asset,
