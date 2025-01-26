@@ -1,5 +1,4 @@
 import logging
-
 import gradio as gr
 import pandas as pd
 import torch
@@ -24,8 +23,8 @@ sentiment_analyzer = pipeline(
 )
 logging.info("Model initialized successfully")
 
-
 def fetch_articles(query):
+    """Fetch articles from Google News based on the query."""
     try:
         logging.info(f"Fetching articles for query: '{query}'")
         googlenews = GoogleNews(lang="en")
@@ -42,15 +41,15 @@ def fetch_articles(query):
             duration=5,
         )
 
-
 def analyze_article_sentiment(article):
+    """Analyze the sentiment of a single article."""
     logging.info(f"Analyzing sentiment for article: {article['title']}")
     sentiment = sentiment_analyzer(article["desc"])[0]
     article["sentiment"] = sentiment
     return article
 
-
 def analyze_asset_sentiment(asset_name):
+    """Analyze the sentiment of news articles related to a trading asset."""
     logging.info(f"Starting sentiment analysis for asset: {asset_name}")
 
     logging.info("Fetching articles")
@@ -63,8 +62,8 @@ def analyze_asset_sentiment(asset_name):
 
     return convert_to_dataframe(analyzed_articles)
 
-
 def convert_to_dataframe(analyzed_articles):
+    """Convert the list of analyzed articles to a DataFrame."""
     df = pd.DataFrame(analyzed_articles)
     df["Title"] = df.apply(
         lambda row: f'<a href="{row["link"]}" target="_blank">{row["title"]}</a>',
@@ -84,7 +83,6 @@ def convert_to_dataframe(analyzed_articles):
 
     df["Sentiment"] = df["sentiment"].apply(lambda x: sentiment_badge(x["label"]))
     return df[["Sentiment", "Title", "Description", "Date"]]
-
 
 with gr.Blocks() as iface:
     gr.Markdown("# Trading Asset Sentiment Analysis")
