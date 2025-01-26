@@ -7,6 +7,7 @@ from transformers import pipeline
 import yfinance as yf
 import requests
 from fuzzywuzzy import process
+import statistics
 
 # Set up logging
 logging.basicConfig(
@@ -164,6 +165,88 @@ def _format_number(num):
         return f"{num:,.2f}P"
     return num
 
+def generate_stock_recommendation(articles, finance_data):
+    """
+    Generate a stock recommendation based on sentiment analysis and financial indicators
+    """
+    # Extract sentiment from articles
+    if not articles or len(articles) == 0:
+        return "Insufficient data for recommendation"
+    
+    # Sentiment scoring
+    sentiment_labels = [article['sentiment']['label'] for article in articles]
+    sentiment_scores = {
+        'positive': sentiment_labels.count('positive'),
+        'negative': sentiment_labels.count('negative'),
+        'neutral': sentiment_labels.count('neutral')
+    }
+    
+    # Calculate sentiment ratio
+    total_articles = len(sentiment_labels)
+    sentiment_ratio = {
+        'positive': sentiment_scores['positive'] / total_articles * 100,
+        'negative': sentiment_scores['negative'] / total_articles * 100,
+        'neutral': sentiment_scores['neutral'] / total_articles * 100
+    }
+    
+    # Recommendation logic
+    recommendation = {
+        'recommendation': 'HOLD',
+        'confidence': 'Medium',
+        'reasons': []
+    }
+    
+    # Financial indicators
+    price_change = finance_data.get('percent_change', 0)
+    pe_ratio = finance_data.get('pe_ratio', 'N/A')
+    dividend_yield = finance_data.get('dividend_yield', 'N/A')
+    
+    # Sentiment-based recommendation
+    if sentiment_ratio['positive'] > 60:
+        recommendation['recommendation'] = 'BUY'
+        recommendation['confidence'] = 'High'
+        recommendation['reasons'].append("Predominantly positive news sentiment")
+    elif sentiment_ratio['negative'] > 60:
+        recommendation['recommendation'] = 'SELL'
+        recommendation['confidence'] = 'High'
+        recommendation['reasons'].append("Predominantly negative news sentiment")
+    
+    # Additional financial considerations
+    if isinstance(price_change, float):
+        if price_change > 2:
+            recommendation['reasons'].append(f"Strong positive price movement (+{price_change:.2f}%)")
+        elif price_change < -2:
+            recommendation['reasons'].append(f"Significant price decline ({price_change:.2f}%)")
+    
+    # PE Ratio consideration
+    if isinstance(pe_ratio, (int, float)):
+        if 0 < pe_ratio < 15:
+            recommendation['reasons'].append(f"Attractive PE Ratio ({pe_ratio:.2f})")
+        elif pe_ratio > 30:
+            recommendation['reasons'].append(f"High PE Ratio ({pe_ratio:.2f}) - potential overvaluation")
+    
+    # Dividend yield consideration
+    if isinstance(dividend_yield, str) and dividend_yield != 'N/A':
+        div_yield = float(dividend_yield.rstrip('%'))
+        if div_yield > 3:
+            recommendation['reasons'].append(f"Attractive dividend yield ({dividend_yield})")
+    
+    # Combine results
+    recommendation_text = f"""
+Recommendation: {recommendation['recommendation']}
+Confidence: {recommendation['confidence']}
+
+Reasons:
+{chr(10).join('- ' + reason for reason in recommendation['reasons'])}
+
+Sentiment Breakdown:
+- Positive Articles: {sentiment_ratio['positive']:.2f}%
+- Neutral Articles: {sentiment_ratio['neutral']:.2f}%
+- Negative Articles: {sentiment_ratio['negative']:.2f}%
+"""
+    
+    return recommendation_text
+
 def analyze_asset_sentiment(asset_input):
     logging.info(f"Starting sentiment analysis for asset: {asset_input}")
 
@@ -183,37 +266,25 @@ def analyze_asset_sentiment(asset_input):
         logging.info("Fetching Yahoo Finance data")
         finance_data = fetch_yfinance_data(ticker)
 
+        # Generate stock recommendation
+        logging.info("Generating stock recommendation")
+        recommendation = generate_stock_recommendation(analyzed_articles, finance_data)
+
         logging.info("Sentiment analysis completed")
-        return convert_to_dataframe(analyzed_articles), finance_data
+        return (
+            convert_to_dataframe(analyzed_articles), 
+            finance_data, 
+            recommendation
+        )
     except ValueError as e:
         logging.error(f"Error resolving ticker: {str(e)}")
         raise gr.Error(f"Invalid input: {str(e)}")
 
-def convert_to_dataframe(analyzed_articles):
-    df = pd.DataFrame(analyzed_articles)
-    df["Title"] = df.apply(
-        lambda row: f'<a href="{row["link"]}" target="_blank">{row["title"]}</a>',
-        axis=1,
-    )
-    df["Description"] = df["desc"]
-    df["Date"] = df["date"]
-
-    def sentiment_badge(sentiment):
-        colors = {
-            "negative": "red",
-            "neutral": "gray",
-            "positive": "green",
-        }
-        color = colors.get(sentiment, "grey")
-        return f'<span style="background-color: {color}; color: white; padding: 2px 6px; border-radius: 4px;">{sentiment}</span>'
-
-    df["Sentiment"] = df["sentiment"].apply(lambda x: sentiment_badge(x["label"]))
-    return df[["Sentiment", "Title", "Description", "Date"]]
-
+# Update Gradio interface to include recommendation output
 with gr.Blocks() as iface:
     gr.Markdown("# Trading Asset Sentiment Analysis")
     gr.Markdown(
-        "Enter the name of a trading asset, and I'll fetch recent articles and analyze their sentiment!"
+        "Enter the name of a trading asset, and I'll fetch recent articles, analyze their sentiment, and provide a stock recommendation!"
     )
 
     with gr.Row():
@@ -251,11 +322,21 @@ with gr.Blocks() as iface:
             with gr.Blocks():
                 gr.Markdown("## Financial Data")
                 finance_output = gr.JSON()
+                
+    with gr.Row():
+        with gr.Column():
+            with gr.Blocks():
+                gr.Markdown("## Stock Recommendation")
+                recommendation_output = gr.Textbox(
+                    label="Recommendation",
+                    lines=10,
+                    interactive=False
+                )
 
     analyze_button.click(
         analyze_asset_sentiment,
         inputs=[input_asset],
-        outputs=[articles_output, finance_output],
+        outputs=[articles_output, finance_output, recommendation_output],
     )
 
 logging.info("Launching Gradio interface")
