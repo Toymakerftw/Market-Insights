@@ -165,6 +165,27 @@ def _format_number(num):
         return f"{num:,.2f}P"
     return num
 
+def convert_to_dataframe(analyzed_articles):
+    df = pd.DataFrame(analyzed_articles)
+    df["Title"] = df.apply(
+        lambda row: f'<a href="{row["link"]}" target="_blank">{row["title"]}</a>',
+        axis=1,
+    )
+    df["Description"] = df["desc"]
+    df["Date"] = df["date"]
+
+    def sentiment_badge(sentiment):
+        colors = {
+            "negative": "red",
+            "neutral": "gray",
+            "positive": "green",
+        }
+        color = colors.get(sentiment, "grey")
+        return f'<span style="background-color: {color}; color: white; padding: 2px 6px; border-radius: 4px;">{sentiment}</span>'
+
+    df["Sentiment"] = df["sentiment"].apply(lambda x: sentiment_badge(x["label"]))
+    return df[["Sentiment", "Title", "Description", "Date"]]
+
 def generate_stock_recommendation(articles, finance_data):
     """
     Generate a stock recommendation based on sentiment analysis and financial indicators
