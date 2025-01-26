@@ -49,46 +49,69 @@ def analyze_article_sentiment(article):
     return article
 
 def scrape_google_finance(ticker):
-    """
-    Scrape basic stock information from Google Finance.
-    Optimized for Hugging Face space with minimal dependencies.
-    """
-    # Predefined stock data with minimal structure
+    """Enhanced Google Finance scraper with better selectors and error handling."""
     stock_data = {
         "price": "N/A",
         "change": "N/A",
-        "percent_change": "N/A"
+        "percent_change": "N/A",
+        "market_cap": "N/A",
+        "pe_ratio": "N/A",
+        "volume": "N/A",
+        "year_range": "N/A"
     }
 
     try:
         url = f"https://www.google.com/finance/quote/{ticker}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
         }
-        
-        # Limit request timeout to prevent long-running scrapes
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # Raise an error for bad status codes
 
+        # Use session with retry logic
+        session = requests.Session()
+        session.mount('https://', requests.adapters.HTTPAdapter(max_retries=3))
+        
+        response = session.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
         soup = BeautifulSoup(response.content, "html.parser")
 
         # Price extraction
-        price_div = soup.find("div", class_="YMlKec fxKbKc")
-        change_div = soup.find("div", class_="JwB6zf")
-        percent_change_div = soup.find("div", class_="Iap8Fd")
-
-        # Update stock data with extracted values
+        price_div = soup.find("div", class_="YMlKec")
         if price_div:
             stock_data["price"] = price_div.text.strip()
-        if change_div:
-            stock_data["change"] = change_div.text.strip()
-        if percent_change_div:
-            stock_data["percent_change"] = percent_change_div.text.strip()
+
+        # Price change and percentage
+        change_container = soup.find("div", class_="gyFHrc")
+        if change_container:
+            change_elements = change_container.find_all("div", class_="JwB6zf")
+            if len(change_elements) >= 2:
+                stock_data["change"] = change_elements[0].text.strip()
+                stock_data["percent_change"] = change_elements[1].text.strip()
+
+        # Additional financial metrics
+        metrics = {
+            "Market cap": "market_cap",
+            "P/E ratio": "pe_ratio",
+            "Volume": "volume",
+            "Year range": "year_range"
+        }
+
+        for row in soup.find_all("div", class_="mfs7Fc"):
+            label = row.text.strip()
+            value_div = row.find_next_sibling("div", class_="P6K39c")
+            if value_div and label in metrics:
+                stock_data[metrics[label]] = value_div.text.strip()
 
     except requests.RequestException as e:
-        print(f"Network error scraping {ticker}: {e}")
+        logging.error(f"Network error scraping {ticker}: {str(e)}")
     except Exception as e:
-        print(f"Unexpected error scraping {ticker}: {e}")
+        logging.error(f"Error processing {ticker} data: {str(e)}")
+
+    # Clean numerical values
+    for key in ["price", "change", "percent_change", "market_cap", "volume"]:
+        if stock_data[key] != "N/A":
+            stock_data[key] = stock_data[key].replace(',', '').replace('$', '')
 
     return stock_data
 
