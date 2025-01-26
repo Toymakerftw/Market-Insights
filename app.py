@@ -4,8 +4,7 @@ import pandas as pd
 import torch
 from GoogleNews import GoogleNews
 from transformers import pipeline
-import requests
-from bs4 import BeautifulSoup
+import yfinance as yf
 
 # Set up logging
 logging.basicConfig(
@@ -48,72 +47,75 @@ def analyze_article_sentiment(article):
     article["sentiment"] = sentiment
     return article
 
-def scrape_google_finance(ticker):
-    """Enhanced Google Finance scraper with better selectors and error handling."""
-    stock_data = {
-        "price": "N/A",
-        "change": "N/A",
-        "percent_change": "N/A",
-        "market_cap": "N/A",
-        "pe_ratio": "N/A",
-        "volume": "N/A",
-        "year_range": "N/A"
-    }
-
+def fetch_yfinance_data(ticker):
+    """Enhanced Yahoo Finance data fetching using official yfinance patterns"""
     try:
-        url = f"https://www.google.com/finance/quote/{ticker}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-
-        # Use session with retry logic
-        session = requests.Session()
-        session.mount('https://', requests.adapters.HTTPAdapter(max_retries=3))
+        logging.info(f"Fetching Yahoo Finance data for: {ticker}")
+        stock = yf.Ticker(ticker)
         
-        response = session.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
+        # Get market state and current session prices
+        info = stock.info
+        history = stock.history(period="2d", interval="1d")  # Get 2 days for change calculation
         
-        soup = BeautifulSoup(response.content, "html.parser")
+        # Base price information
+        current_price = info.get('currentPrice', 
+                              info.get('regularMarketPrice',
+                              info.get('ask', 'N/A')))
+        
+        # Calculate price change using proper market session data
+        if not history.empty and len(history) > 1:
+            prev_close = history.iloc[-2]['Close']
+            current_close = history.iloc[-1]['Close']
+            change = current_close - prev_close
+            percent_change = (change / prev_close) * 100
+        else:
+            change = info.get('regularMarketChange', 'N/A')
+            percent_change = info.get('regularMarketChangePercent', 'N/A')
 
-        # Price extraction
-        price_div = soup.find("div", class_="YMlKec")
-        if price_div:
-            stock_data["price"] = price_div.text.strip()
+        # Format market cap with proper suffixes
+        market_cap = info.get('marketCap')
+        if market_cap and market_cap != 'N/A':
+            market_cap = f"${_format_number(market_cap)}"
 
-        # Price change and percentage
-        change_container = soup.find("div", class_="gyFHrc")
-        if change_container:
-            change_elements = change_container.find_all("div", class_="JwB6zf")
-            if len(change_elements) >= 2:
-                stock_data["change"] = change_elements[0].text.strip()
-                stock_data["percent_change"] = change_elements[1].text.strip()
-
-        # Additional financial metrics
-        metrics = {
-            "Market cap": "market_cap",
-            "P/E ratio": "pe_ratio",
-            "Volume": "volume",
-            "Year range": "year_range"
+        return {
+            # Core pricing
+            'price': f"{current_price:.2f}" if isinstance(current_price, float) else current_price,
+            'currency': info.get('currency', 'USD'),
+            'previous_close': f"{prev_close:.2f}" if 'prev_close' in locals() else 'N/A',
+            
+            # Price movements
+            'change': f"{change:.2f}" if isinstance(change, float) else change,
+            'percent_change': f"{percent_change:.2f}%" if isinstance(percent_change, float) else percent_change,
+            'day_range': f"{info.get('dayLow', 'N/A')} - {info.get('dayHigh', 'N/A')}",
+            
+            # Market data
+            'market_cap': market_cap,
+            'volume': _format_number(info.get('volume', 'N/A')),
+            'pe_ratio': info.get('trailingPE', info.get('forwardPE', 'N/A')),
+            '52_week_range': f"{info.get('fiftyTwoWeekLow', 'N/A')} - {info.get('fiftyTwoWeekHigh', 'N/A')}",
+            
+            # Additional fundamentals
+            'dividend_yield': f"{info.get('dividendYield', 0) * 100:.2f}%" if info.get('dividendYield') else 'N/A',
+            'beta': info.get('beta', 'N/A'),
+            
+            # Market state
+            'market_state': info.get('marketState', 'CLOSED').title(),
+            'exchange': info.get('exchangeName', 'N/A')
         }
-
-        for row in soup.find_all("div", class_="mfs7Fc"):
-            label = row.text.strip()
-            value_div = row.find_next_sibling("div", class_="P6K39c")
-            if value_div and label in metrics:
-                stock_data[metrics[label]] = value_div.text.strip()
-
-    except requests.RequestException as e:
-        logging.error(f"Network error scraping {ticker}: {str(e)}")
+        
     except Exception as e:
-        logging.error(f"Error processing {ticker} data: {str(e)}")
+        logging.error(f"Error fetching Yahoo Finance data: {str(e)}")
+        return {"error": f"Failed to fetch data for {ticker}: {str(e)}"}
 
-    # Clean numerical values
-    for key in ["price", "change", "percent_change", "market_cap", "volume"]:
-        if stock_data[key] != "N/A":
-            stock_data[key] = stock_data[key].replace(',', '').replace('$', '')
-
-    return stock_data
+def _format_number(num):
+    """Helper to format large numbers with suffixes"""
+    if isinstance(num, (int, float)):
+        for unit in ['','K','M','B','T']:
+            if abs(num) < 1000:
+                return f"{num:,.2f}{unit}"
+            num /= 1000
+        return f"{num:,.2f}P"
+    return num
 
 def analyze_asset_sentiment(asset_name):
     logging.info(f"Starting sentiment analysis for asset: {asset_name}")
@@ -124,11 +126,10 @@ def analyze_asset_sentiment(asset_name):
     logging.info("Analyzing sentiment of each article")
     analyzed_articles = [analyze_article_sentiment(article) for article in articles]
 
-    logging.info("Scraping Google Finance data")
-    finance_data = scrape_google_finance(asset_name)
+    logging.info("Fetching Yahoo Finance data")
+    finance_data = fetch_yfinance_data(asset_name)
 
     logging.info("Sentiment analysis completed")
-
     return convert_to_dataframe(analyzed_articles), finance_data
 
 def convert_to_dataframe(analyzed_articles):
@@ -160,9 +161,9 @@ with gr.Blocks() as iface:
 
     with gr.Row():
         input_asset = gr.Textbox(
-            label="Asset Name",
+            label="Asset Ticker Symbol",
             lines=1,
-            placeholder="Enter the name of the trading asset...",
+            placeholder="Enter the ticker symbol (e.g., AAPL, TSLA, BTC-USD)...",
         )
 
     with gr.Row():
@@ -170,10 +171,10 @@ with gr.Blocks() as iface:
 
     gr.Examples(
         examples=[
-            "Bitcoin",
-            "Tesla",
-            "Apple",
-            "Amazon",
+            "AAPL",
+            "TSLA",
+            "AMZN",
+            "BTC-USD"
         ],
         inputs=input_asset,
     )
