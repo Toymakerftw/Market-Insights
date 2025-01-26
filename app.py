@@ -49,33 +49,46 @@ def analyze_article_sentiment(article):
     return article
 
 def scrape_google_finance(ticker):
-    url = f"https://www.google.com/finance/quote/{ticker}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.134 Safari/537.36"
+    """
+    Scrape basic stock information from Google Finance.
+    Optimized for Hugging Face space with minimal dependencies.
+    """
+    # Predefined stock data with minimal structure
+    stock_data = {
+        "price": "N/A",
+        "change": "N/A",
+        "percent_change": "N/A"
     }
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, "html.parser")
 
-    # Extract relevant data
-    stock_data = {}
-    price_div = soup.find("div", class_="YMlKec fxKbKc")
-    change_div = soup.find("div", class_="JwB6zf")
-    percent_change_div = soup.find("div", class_="Iap8Fd")
+    try:
+        url = f"https://www.google.com/finance/quote/{ticker}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        
+        # Limit request timeout to prevent long-running scrapes
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()  # Raise an error for bad status codes
 
-    if price_div:
-        stock_data["price"] = price_div.text
-    else:
-        stock_data["price"] = "N/A"
+        soup = BeautifulSoup(response.content, "html.parser")
 
-    if change_div:
-        stock_data["change"] = change_div.text
-    else:
-        stock_data["change"] = "N/A"
+        # Price extraction
+        price_div = soup.find("div", class_="YMlKec fxKbKc")
+        change_div = soup.find("div", class_="JwB6zf")
+        percent_change_div = soup.find("div", class_="Iap8Fd")
 
-    if percent_change_div:
-        stock_data["percent_change"] = percent_change_div.text
-    else:
-        stock_data["percent_change"] = "N/A"
+        # Update stock data with extracted values
+        if price_div:
+            stock_data["price"] = price_div.text.strip()
+        if change_div:
+            stock_data["change"] = change_div.text.strip()
+        if percent_change_div:
+            stock_data["percent_change"] = percent_change_div.text.strip()
+
+    except requests.RequestException as e:
+        print(f"Network error scraping {ticker}: {e}")
+    except Exception as e:
+        print(f"Unexpected error scraping {ticker}: {e}")
 
     return stock_data
 
