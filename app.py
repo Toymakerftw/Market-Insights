@@ -2,257 +2,204 @@ import logging
 import gradio as gr
 import pandas as pd
 import torch
-import yfinance as yf
-import requests
 from GoogleNews import GoogleNews
 from transformers import pipeline
-from typing import Tuple, Dict, List
+import yfinance as yf
 
-# Configure logging
+# Set up logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()]
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-class NewsAnalyzer:
-    """Handles news article collection and sentiment analysis"""
-    
-    def __init__(self):
-        self.sentiment_analyzer = self._initialize_model()
-        
-    def _initialize_model(self):
-        """Initialize sentiment analysis model"""
-        model_name = "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        logging.info(f"Initializing sentiment model on {device}")
-        return pipeline(
-            "sentiment-analysis",
-            model=model_name,
-            device=device
+SENTIMENT_ANALYSIS_MODEL = (
+    "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
+)
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+logging.info(f"Using device: {DEVICE}")
+
+logging.info("Initializing sentiment analysis model...")
+sentiment_analyzer = pipeline(
+    "sentiment-analysis", model=SENTIMENT_ANALYSIS_MODEL, device=DEVICE
+)
+logging.info("Model initialized successfully")
+
+def fetch_articles(query):
+    try:
+        logging.info(f"Fetching articles for query: '{query}'")
+        googlenews = GoogleNews(lang="en")
+        googlenews.search(query)
+        articles = googlenews.result()
+        logging.info(f"Fetched {len(articles)} articles")
+        return articles
+    except Exception as e:
+        logging.error(
+            f"Error while searching articles for query: '{query}'. Error: {e}"
         )
-    
-    def fetch_articles(self, query: str) -> List[Dict]:
-        """Fetch relevant news articles"""
-        try:
-            logging.info(f"Searching news for: {query}")
-            googlenews = GoogleNews(lang="en", region="US")
-            googlenews.search(query)
-            return googlenews.result()
-        except Exception as e:
-            logging.error(f"News search failed: {str(e)}")
-            raise RuntimeError(f"Failed to fetch news: {str(e)}")
+        raise gr.Error(
+            f"Unable to search articles for query: '{query}'. Try again later...",
+            duration=5,
+        )
 
-    def analyze_articles(self, articles: List[Dict]) -> pd.DataFrame:
-        """Process articles and add sentiment analysis"""
-        analyzed = []
-        for article in articles:
-            try:
-                sentiment = self.sentiment_analyzer(article["desc"])[0]
-                analyzed.append({
-                    **article,
-                    "sentiment_label": sentiment["label"],
-                    "sentiment_score": sentiment["score"]
-                })
-            except Exception as e:
-                logging.warning(f"Failed to analyze article: {str(e)}")
-        return self._format_results(analyzed)
+def analyze_article_sentiment(article):
+    logging.info(f"Analyzing sentiment for article: {article['title']}")
+    sentiment = sentiment_analyzer(article["desc"])[0]
+    article["sentiment"] = sentiment
+    return article
 
-    def _format_results(self, articles: List[Dict]) -> pd.DataFrame:
-        """Convert articles to formatted DataFrame"""
-        df = pd.DataFrame(articles)
-        if not df.empty:
-            df["Title"] = df.apply(
-                lambda x: f'<a href="{x["link"]}" target="_blank">{x["title"]}</a>',
-                axis=1
-            )
-            df["Sentiment"] = df["sentiment_label"].apply(self._sentiment_badge)
-        return df[["Sentiment", "Title", "desc", "date"]] if not df.empty else pd.DataFrame()
-
-    def _sentiment_badge(self, label: str) -> str:
-        """Create styled sentiment badges"""
-        colors = {"negative": "#ef4444", "neutral": "#64748b", "positive": "#22c55e"}
-        return f'<span style="background-color: {colors[label]}; color: white; padding: 2px 8px; border-radius: 4px;">{label.title()}</span>'
-
-class FinancialDataHandler:
-    """Handles financial data retrieval and processing"""
-    
-    def __init__(self):
-        self.valid_types = ["EQUITY", "ETF", "CRYPTOCURRENCY"]
-
-    def resolve_symbol(self, query: str) -> Tuple[str, str]:
-        """Resolve user input to valid ticker symbol"""
-        try:
-            # Try direct match first
-            ticker = yf.Ticker(query)
-            if self._is_valid(ticker):
-                return query.upper(), ticker.info["shortName"]
-        except:
-            pass
-
-        # Fallback to search API
-        results = self._search_symbols(query)
-        if not results:
-            raise ValueError(f"No results found for '{query}'")
-
-        valid_results = [r for r in results if r.get("quoteType") in self.valid_types]
-        if not valid_results:
-            raise ValueError(f"No valid instruments found for '{query}'")
-
-        best_match = valid_results[0]
-        return best_match["symbol"], best_match["shortname"]
-
-    def _is_valid(self, ticker: yf.Ticker) -> bool:
-        """Validate ticker has required data"""
-        required_keys = ["symbol", "shortName", "regularMarketPrice"]
-        return all(key in ticker.info for key in required_keys)
-
-    def _search_symbols(self, query: str) -> List[Dict]:
-        """Search Yahoo Finance API for symbols"""
-        try:
-            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
-            response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            response.raise_for_status()
-            return response.json().get("quotes", [])
-        except Exception as e:
-            logging.error(f"Symbol search failed: {str(e)}")
-            return []
-
-    def get_financials(self, symbol: str) -> Dict:
-        """Retrieve comprehensive financial data"""
-        try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-            history = ticker.history(period="2d")
-            
-            return {
-                "symbol": symbol,
-                "name": info.get("shortName", "N/A"),
-                "price": self._format_price(info),
-                "change": self._calculate_change(history),
-                "market_cap": self._format_market_cap(info),
-                "volume": self._format_number(info.get("volume")),
-                "pe_ratio": info.get("trailingPE", "N/A"),
-                "52_week_range": self._format_range(info),
-                "currency": info.get("currency", "USD"),
-                "error": None
-            }
-        except Exception as e:
-            logging.error(f"Financial data error: {str(e)}")
-            return {"error": str(e)}
-
-    def _format_price(self, info: Dict) -> str:
-        """Format price with currency"""
-        price = info.get("currentPrice") or info.get("regularMarketPrice")
-        return f"{price:,.2f}" if price else "N/A"
-
-    def _calculate_change(self, history: pd.DataFrame) -> Dict:
-        """Calculate price changes from historical data"""
-        if len(history) < 2:
-            return {"amount": "N/A", "percent": "N/A"}
+def fetch_yfinance_data(ticker):
+    """Enhanced Yahoo Finance data fetching using official yfinance patterns"""
+    try:
+        logging.info(f"Fetching Yahoo Finance data for: {ticker}")
+        stock = yf.Ticker(ticker)
         
-        prev_close = history.iloc[-2]["Close"]
-        current_close = history.iloc[-1]["Close"]
-        change = current_close - prev_close
-        percent = (change / prev_close) * 100
+        # Get market state and current session prices
+        info = stock.info
+        history = stock.history(period="2d", interval="1d")  # Get 2 days for change calculation
         
+        # Base price information
+        current_price = info.get('currentPrice', 
+                              info.get('regularMarketPrice',
+                              info.get('ask', 'N/A')))
+        
+        # Calculate price change using proper market session data
+        if not history.empty and len(history) > 1:
+            prev_close = history.iloc[-2]['Close']
+            current_close = history.iloc[-1]['Close']
+            change = current_close - prev_close
+            percent_change = (change / prev_close) * 100
+        else:
+            change = info.get('regularMarketChange', 'N/A')
+            percent_change = info.get('regularMarketChangePercent', 'N/A')
+
+        # Format market cap with proper suffixes
+        market_cap = info.get('marketCap')
+        if market_cap and market_cap != 'N/A':
+            market_cap = f"${_format_number(market_cap)}"
+
         return {
-            "amount": f"{change:+,.2f}",
-            "percent": f"{percent:+,.2f}%"
+            # Core pricing
+            'price': f"{current_price:.2f}" if isinstance(current_price, float) else current_price,
+            'currency': info.get('currency', 'USD'),
+            'previous_close': f"{prev_close:.2f}" if 'prev_close' in locals() else 'N/A',
+            
+            # Price movements
+            'change': f"{change:.2f}" if isinstance(change, float) else change,
+            'percent_change': f"{percent_change:.2f}%" if isinstance(percent_change, float) else percent_change,
+            'day_range': f"{info.get('dayLow', 'N/A')} - {info.get('dayHigh', 'N/A')}",
+            
+            # Market data
+            'market_cap': market_cap,
+            'volume': _format_number(info.get('volume', 'N/A')),
+            'pe_ratio': info.get('trailingPE', info.get('forwardPE', 'N/A')),
+            '52_week_range': f"{info.get('fiftyTwoWeekLow', 'N/A')} - {info.get('fiftyTwoWeekHigh', 'N/A')}",
+            
+            # Additional fundamentals
+            'dividend_yield': f"{info.get('dividendYield', 0) * 100:.2f}%" if info.get('dividendYield') else 'N/A',
+            'beta': info.get('beta', 'N/A'),
+            
+            # Market state
+            'market_state': info.get('marketState', 'CLOSED').title(),
+            'exchange': info.get('exchangeName', 'N/A')
         }
+        
+    except Exception as e:
+        logging.error(f"Error fetching Yahoo Finance data: {str(e)}")
+        return {"error": f"Failed to fetch data for {ticker}: {str(e)}"}
 
-    def _format_market_cap(self, info: Dict) -> str:
-        """Format market cap with proper suffix"""
-        cap = info.get("marketCap")
-        suffixes = ["", "K", "M", "B", "T"]
-        for suffix in suffixes:
-            if cap < 1000:
-                return f"${cap:,.2f}{suffix}"
-            cap /= 1000
-        return f"${cap:,.2f}P"
+def _format_number(num):
+    """Helper to format large numbers with suffixes"""
+    if isinstance(num, (int, float)):
+        for unit in ['','K','M','B','T']:
+            if abs(num) < 1000:
+                return f"{num:,.2f}{unit}"
+            num /= 1000
+        return f"{num:,.2f}P"
+    return num
 
-    def _format_number(self, num: float) -> str:
-        """Format large numbers with commas"""
-        return f"{num:,.0f}" if num else "N/A"
+def analyze_asset_sentiment(asset_name):
+    logging.info(f"Starting sentiment analysis for asset: {asset_name}")
 
-    def _format_range(self, info: Dict) -> str:
-        """Format 52-week range"""
-        low = info.get("fiftyTwoWeekLow")
-        high = info.get("fiftyTwoWeekHigh")
-        return f"{low:,.2f} - {high:,.2f}" if low and high else "N/A"
+    logging.info("Fetching articles")
+    articles = fetch_articles(asset_name)
 
-class TradingAnalysisApp:
-    """Main application orchestrator"""
-    
-    def __init__(self):
-        self.news_analyzer = NewsAnalyzer()
-        self.finance_handler = FinancialDataHandler()
+    logging.info("Analyzing sentiment of each article")
+    analyzed_articles = [analyze_article_sentiment(article) for article in articles]
 
-    def analyze(self, user_input: str) -> Tuple[pd.DataFrame, Dict]:
-        """Main analysis workflow"""
-        try:
-            # Resolve symbol and get financial data
-            symbol, name = self.finance_handler.resolve_symbol(user_input)
-            financials = self.finance_handler.get_financials(symbol)
-            
-            # Get and analyze news articles
-            articles = self.news_analyzer.fetch_articles(name)
-            analyzed_news = self.news_analyzer.analyze_articles(articles)
-            
-            return analyzed_news, financials
-            
-        except Exception as e:
-            logging.error(f"Analysis failed: {str(e)}")
-            return pd.DataFrame(), {"error": str(e)}
+    logging.info("Fetching Yahoo Finance data")
+    finance_data = fetch_yfinance_data(asset_name)
 
-    def create_interface(self):
-        """Build Gradio interface"""
-        with gr.Blocks(title="Trading Asset Analyzer", theme="soft") as app:
-            gr.Markdown("# 🧠 Smart Trading Asset Analyzer")
-            gr.Markdown("Analyze financial instruments using news sentiment and market data")
-            
-            with gr.Row():
-                with gr.Column(scale=2):
-                    input_box = gr.Textbox(
-                        label="Asset Name or Symbol",
-                        placeholder="Enter company name or ticker symbol..."
-                    )
-                    examples = gr.Examples(
-                        examples=["Apple", "TSLA", "BTC-USD", "Amazon", "S&P 500"],
-                        inputs=[input_box]
-                    )
-                    analyze_btn = gr.Button("Analyze", variant="primary")
-                
-                with gr.Column(scale=3):
-                    with gr.Tab("News Sentiment"):
-                        news_output = gr.Dataframe(
-                            label="Recent News Analysis",
-                            headers=["Sentiment", "Title", "Description", "Date"],
-                            datatype=["html", "html", "str", "str"]
-                        )
-                    
-                    with gr.Tab("Financial Data"):
-                        finance_output = gr.JSON(
-                            label="Market Analysis",
-                            show_label=False
-                        )
-                    
-                    error_output = gr.JSON(
-                        visible=False,
-                        label="Analysis Errors"
-                    )
+    logging.info("Sentiment analysis completed")
+    return convert_to_dataframe(analyzed_articles), finance_data
 
-            analyze_btn.click(
-                self.analyze,
-                inputs=[input_box],
-                outputs=[news_output, finance_output],
-                show_progress="full"
-            )
+def convert_to_dataframe(analyzed_articles):
+    df = pd.DataFrame(analyzed_articles)
+    df["Title"] = df.apply(
+        lambda row: f'<a href="{row["link"]}" target="_blank">{row["title"]}</a>',
+        axis=1,
+    )
+    df["Description"] = df["desc"]
+    df["Date"] = df["date"]
 
-        return app
+    def sentiment_badge(sentiment):
+        colors = {
+            "negative": "red",
+            "neutral": "gray",
+            "positive": "green",
+        }
+        color = colors.get(sentiment, "grey")
+        return f'<span style="background-color: {color}; color: white; padding: 2px 6px; border-radius: 4px;">{sentiment}</span>'
 
-if __name__ == "__main__":
-    logging.info("Initializing application")
-    analyzer = TradingAnalysisApp()
-    interface = analyzer.create_interface()
-    interface.queue(concurrency_count=2).launch()
+    df["Sentiment"] = df["sentiment"].apply(lambda x: sentiment_badge(x["label"]))
+    return df[["Sentiment", "Title", "Description", "Date"]]
+
+with gr.Blocks() as iface:
+    gr.Markdown("# Trading Asset Sentiment Analysis")
+    gr.Markdown(
+        "Enter the name of a trading asset, and I'll fetch recent articles and analyze their sentiment!"
+    )
+
+    with gr.Row():
+        input_asset = gr.Textbox(
+            label="Asset Ticker Symbol",
+            lines=1,
+            placeholder="Enter the ticker symbol (e.g., AAPL, TSLA, BTC-USD)...",
+        )
+
+    with gr.Row():
+        analyze_button = gr.Button("Analyze Sentiment", size="sm")
+
+    gr.Examples(
+        examples=[
+            "AAPL",
+            "TSLA",
+            "AMZN",
+            "BTC-USD"
+        ],
+        inputs=input_asset,
+    )
+
+    with gr.Row():
+        with gr.Column():
+            with gr.Blocks():
+                gr.Markdown("## Articles and Sentiment Analysis")
+                articles_output = gr.Dataframe(
+                    headers=["Sentiment", "Title", "Description", "Date"],
+                    datatype=["markdown", "html", "markdown", "markdown"],
+                    wrap=False,
+                )
+
+    with gr.Row():
+        with gr.Column():
+            with gr.Blocks():
+                gr.Markdown("## Financial Data")
+                finance_output = gr.JSON()
+
+    analyze_button.click(
+        analyze_asset_sentiment,
+        inputs=[input_asset],
+        outputs=[articles_output, finance_output],
+    )
+
+logging.info("Launching Gradio interface")
+iface.queue().launch()
