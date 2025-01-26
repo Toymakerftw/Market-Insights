@@ -56,9 +56,18 @@ def resolve_ticker_symbol(query: str, exchange: str = "NSE") -> str:
         best_match = process.extractOne(query, names)
         if best_match:
             index = names.index(best_match[0])
-            return tickers[index] + EXCHANGE_SUFFIXES.get(exchange, "")
+            resolved_ticker = tickers[index]
+            
+            # Ensure the exchange suffix is only added if not already present
+            if not resolved_ticker.endswith(EXCHANGE_SUFFIXES.get(exchange, "")):
+                resolved_ticker += EXCHANGE_SUFFIXES.get(exchange, "")
+            return resolved_ticker
         else:
-            return tickers[0] + EXCHANGE_SUFFIXES.get(exchange, "")  # Default to first result
+            # Default to first result
+            resolved_ticker = tickers[0]
+            if not resolved_ticker.endswith(EXCHANGE_SUFFIXES.get(exchange, "")):
+                resolved_ticker += EXCHANGE_SUFFIXES.get(exchange, "")
+            return resolved_ticker
     else:
         raise ValueError(f"No ticker found for: {query}")
 
