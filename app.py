@@ -244,7 +244,7 @@ def _format_number(num):
 
 def convert_to_dataframe(analyzed_articles):
     df = pd.DataFrame(analyzed_articles)
-    
+
     def sentiment_badge(sentiment):
         colors = {
             "negative": "#ef4444",
@@ -269,32 +269,39 @@ def convert_to_dataframe(analyzed_articles):
 
     # Convert to HTML table
     html_table = df[["Sentiment", "Title", "Description", "Date"]].to_html(
-        escape=False, 
+        escape=False,
         index=False,
         border=0,
         classes="gradio-table",
         justify="start"
     )
-    
+
     # Add custom styling
     styled_html = f"""
     <style>
     .gradio-table {{
         width: 100%;
         border-collapse: collapse;
+        margin-bottom: 1rem;
     }}
     .gradio-table th {{
         text-align: left;
         padding: 0.75rem;
-        background-color: #f8fafc;
-        border-bottom: 2px solid #e2e8f0;
+        background-color: #f3f4f6;
+        border-bottom: 2px solid #d1d5db;
+        color: #1f2937;
+        font-weight: 600;
     }}
     .gradio-table td {{
         padding: 0.75rem;
-        border-bottom: 1px solid #f1f5f9;
+        border-bottom: 1px solid #e5e7eb;
+        background-color: #ffffff;
     }}
     .gradio-table tr:hover td {{
-        background-color: #f8fafc;
+        background-color: #f9fafb;
+    }}
+    .gradio-table tr:nth-child(even) td {{
+        background-color: #f9fafb;
     }}
     </style>
     {html_table}
