@@ -11,6 +11,8 @@ from fuzzywuzzy import process
 import statistics
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="fuzzywuzzy")
 
 # Set up logging
 logging.basicConfig(
@@ -321,39 +323,41 @@ def analyze_asset_sentiment(asset_input):
     logging.info(f"Starting sentiment analysis for asset: {asset_input}")
 
     try:
-        # Resolve ticker symbol from user input
+        # Resolve ticker symbol
         ticker = resolve_ticker_symbol(asset_input)
         logging.info(f"Resolved '{asset_input}' to ticker: {ticker}")
 
-        # Fetch articles and analyze sentiment
-        logging.info("Fetching articles")
+        # Fetch and analyze articles
         articles = fetch_articles(asset_input)
-
-        logging.info("Analyzing sentiment of each article")
         analyzed_articles = [analyze_article_sentiment(article) for article in articles]
 
-        # Fetch Yahoo Finance data
-        logging.info("Fetching Yahoo Finance data")
+        # Fetch financial data and technical indicators
         finance_data = fetch_yfinance_data(ticker)
         
-        # Extract chart from finance data
-        price_chart = finance_data.pop('chart', None)
+        # Extract chart and ensure it's removed from financial data
+        price_chart = finance_data.get('chart')
+        if 'chart' in finance_data:
+            del finance_data['chart']
 
-        # Generate stock recommendation
-        logging.info("Generating stock recommendation")
+        # Generate recommendation
         recommendation = generate_stock_recommendation(analyzed_articles, finance_data)
 
-        logging.info("Sentiment analysis completed")
         return (
-            convert_to_dataframe(analyzed_articles), 
-            finance_data,  # Financial data without chart
-            recommendation,
-            price_chart    # Chart as separate output
+            convert_to_dataframe(analyzed_articles),  # Articles dataframe
+            finance_data,                             # Financial data (without chart)
+            recommendation,                           # Text recommendation
+            price_chart                               # Matplotlib figure
         )
-    except ValueError as e:
-        logging.error(f"Error resolving ticker: {str(e)}")
-        raise gr.Error(f"Invalid input: {str(e)}")
-    
+
+    except Exception as e:
+        logging.error(f"Error in analysis: {str(e)}")
+        return (
+            pd.DataFrame(), 
+            {"error": str(e)}, 
+            "Analysis failed", 
+            None
+        )
+        
 # Update Gradio interface with new components
 with gr.Blocks(theme=gr.themes.Default()) as iface:
     gr.Markdown("# Advanced Trading Analytics Suite")
@@ -368,26 +372,22 @@ with gr.Blocks(theme=gr.themes.Default()) as iface:
     
     with gr.Tabs():
         with gr.TabItem("Sentiment Analysis"):
-            gr.Markdown("## News Sentiment Analysis")
-            articles_output = gr.Dataframe(
-                headers=["Sentiment", "Title", "Description", "Date"],
-                datatype=["markdown", "html", "markdown", "markdown"]
-            )
-            
+            articles_output = gr.Dataframe(render=False)  # Temporary hidden
+            gr.Markdown("## News Sentiment Analysis", render=False)
+            articles_output.render()
+
         with gr.TabItem("Technical Analysis"):
-            gr.Markdown("## Technical Indicators")
-            with gr.Row():
-                price_chart = gr.Plot(label="Price Analysis")
-                ta_json = gr.JSON(label="Technical Indicators")
-                
+            price_chart = gr.Plot(label="Price Analysis")
+            ta_json = gr.JSON(label="Technical Indicators")
+
         with gr.TabItem("Recommendation"):
-            gr.Markdown("## Trading Recommendation")
             recommendation_output = gr.Textbox(
                 lines=8,
                 label="Analysis Summary",
                 interactive=False
             )
     
+    # Move the click handler inside the Blocks context
     analyze_btn.click(
         analyze_asset_sentiment,
         inputs=[input_asset],
