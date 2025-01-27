@@ -4,127 +4,75 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stock Analysis Suite | Ocean Blue</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        :root {
-            --primary: rgb(37, 150, 190);
-            --on-primary: #FFFFFF;
-            --surface: #100c1c;
-            --surface-container: rgba(255, 255, 255, 0.1);
-            --outline: rgba(255, 255, 255, 0.2);
-            --text-primary: #FFFFFF;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        body {
+            background-color: #100c1c;
+            color: #fff;
             font-family: 'Roboto', sans-serif;
         }
 
-        body {
-            background: var(--surface);
-            color: var(--text-primary);
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 24px;
-        }
-
         header {
-            background: var(--surface-container);
-            padding: 24px;
+            background-color: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
             position: sticky;
             top: 0;
-            z-index: 100;
-        }
-
-        nav {
-            display: flex;
-            gap: 24px;
-            margin-top: 16px;
+            z-index: 1000;
         }
 
         nav a {
-            color: var(--text-primary);
-            text-decoration: none;
+            color: #fff;
             font-weight: 500;
-            padding: 8px;
-            border-radius: 4px;
-            transition: all 0.2s ease;
         }
 
         nav a:hover {
-            background: rgba(255,255,255,0.1);
+            background-color: rgba(255, 255, 255, 0.1);
         }
 
         .section {
-            background: var(--surface-container);
-            border-radius: 16px;
-            padding: 24px;
-            margin: 24px 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+            padding: 2rem;
+            margin: 2rem 0;
             backdrop-filter: blur(8px);
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-        }
-
-        h2 {
-            font-size: 1.8rem;
-            margin-bottom: 16px;
-        }
-
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 24px;
-            margin: 24px 0;
-        }
-
-        .feature-card {
-            background: rgba(255,255,255,0.05);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid var(--outline);
         }
 
         footer {
-            background: var(--surface-container);
+            background-color: rgba(255, 255, 255, 0.1);
             text-align: center;
-            padding: 24px;
-            margin-top: 40px;
+            padding: 1.5rem;
             backdrop-filter: blur(8px);
         }
 
-        #gradio-embed {
-            width: 100%;
-            max-width: 1000px;
-            margin: 40px auto;
-            border-radius: 16px;
-            overflow: hidden;
+        .btn-primary {
+            background-color: rgb(37, 150, 190);
+            border: none;
         }
 
-        gradio-app {
-            --block-background: var(--surface-container);
-            --block-border: none;
-            --block-radius: 16px;
-            --block-padding: 16px;
+        .btn-primary:hover {
+            background-color: #2f8db7;
+        }
+
+        #gradio-embed {
+            display: none;
+        }
+
+        .feature-card {
+            background-color: rgba(255, 255, 255, 0.05);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
     </style>
 </head>
 <body>
-    <header>
-        <div class="container">
-            <h1>Stock Analysis Suite</h1>
+    <header class="py-3 shadow">
+        <div class="container d-flex justify-content-between align-items-center">
+            <h1 class="h4 mb-0">Stock Analysis Suite</h1>
             <nav>
-                <a href="#features">Features</a>
-                <a href="#demo">Demo</a>
-                <a href="#about">About</a>
+                <a href="#features" class="px-3">Features</a>
+                <a href="#demo" class="px-3">Demo</a>
+                <a href="#about" class="px-3">About</a>
             </nav>
         </div>
     </header>
@@ -137,27 +85,34 @@
 
         <section class="section" id="features">
             <h2>Key Features</h2>
-            <div class="feature-grid">
-                <div class="feature-card">
-                    <h3>📈 Sentiment Analysis</h3>
-                    <p>Real-time news sentiment scoring using state-of-the-art NLP models</p>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="feature-card">
+                        <h3>📈 Sentiment Analysis</h3>
+                        <p>Real-time news sentiment scoring using state-of-the-art NLP models.</p>
+                    </div>
                 </div>
-                <div class="feature-card">
-                    <h3>📊 Technical Indicators</h3>
-                    <p>RSI, MACD, Bollinger Bands, and volatility analysis with interactive charts</p>
+                <div class="col-md-4">
+                    <div class="feature-card">
+                        <h3>📊 Technical Indicators</h3>
+                        <p>RSI, MACD, Bollinger Bands, and volatility analysis with interactive charts.</p>
+                    </div>
                 </div>
-                <div class="feature-card">
-                    <h3>🤖 AI Recommendations</h3>
-                    <p>Machine learning-powered buy/sell/hold recommendations with risk assessment</p>
+                <div class="col-md-4">
+                    <div class="feature-card">
+                        <h3>🤖 AI Recommendations</h3>
+                        <p>Machine learning-powered buy/sell/hold recommendations with risk assessment.</p>
+                    </div>
                 </div>
             </div>
         </section>
 
         <section class="section" id="demo">
             <h2>Live Demo</h2>
-            <div id="gradio-embed">
-                <script 
-                    type="module" 
+            <button id="show-demo-btn" class="btn btn-primary d-block mx-auto">Show Demo</button>
+            <div id="gradio-embed" class="mt-4">
+                <script
+                    type="module"
                     src="https://gradio.s3-us-west-2.amazonaws.com/4.39.0/gradio.js">
                 </script>
                 <gradio-app src="https://toyman-stock.hf.space"></gradio-app>
@@ -170,48 +125,31 @@
                 <h3>Technology Stack</h3>
                 <p>Built with:</p>
                 <ul>
-                    <li>Transformers (Hugging Face)</li>
-                    <li>Gradio for UI</li>
-                    <li>Yahoo Finance API</li>
-                    <li>Material Design 3</li>
+                    <li>Transformers (Hugging Face) for advanced NLP models to perform sentiment analysis on financial news.</li>
+                    <li>Gradio for creating the interactive user interface.</li>
+                    <li>Yahoo Finance API for fetching real-time stock data and historical price information.</li>
+                    <li>Pandas and Matplotlib for data manipulation and visualization.</li>
+                    <li>GoogleNews for fetching the latest news articles related to stocks.</li>
                 </ul>
-                <p style="margin-top: 16px; opacity: 0.9;">This analytical tool is for research purposes only. Never invest based solely on automated analysis.</p>
+                <p class="mt-3">This analytical tool is for research purposes only. Never invest based solely on automated analysis.</p>
             </div>
         </section>
     </main>
 
     <footer>
         <div class="container">
-            <p style="opacity: 0.8;">&copy; 2024 Stock Analysis Suite | katlabs</p>
+            <p class="mb-0">&copy; 2024 Stock Analysis Suite | katlabs</p>
         </div>
     </footer>
 
     <script>
-        // Smooth scroll for navigation
-        document.querySelectorAll('nav a').forEach(anchor => {
-            anchor.addEventListener('click', function(e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                target.scrollIntoView({ behavior: 'smooth' });
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('show-demo-btn').addEventListener('click', function() {
+                document.getElementById('gradio-embed').style.display = 'block';
+                this.style.display = 'none';
             });
-        });
-
-        // Add intersection observer for scroll effects
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.style.opacity = 1;
-                    entry.target.style.transform = 'translateY(0)';
-                }
-            });
-        });
-
-        document.querySelectorAll('.section').forEach((section) => {
-            section.style.opacity = 0;
-            section.style.transform = 'translateY(20px)';
-            section.style.transition = 'all 0.4s ease-out';
-            observer.observe(section);
         });
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
