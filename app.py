@@ -125,46 +125,45 @@ def resolve_ticker_symbol(query: str) -> str:
     Convert company names/partial symbols to valid Yahoo Finance tickers.
     Example: "Kalyan Jewellers" → "KALYANKJIL.NS"
     """
-    exchanges = ["NSE", "BSE"]
-    exchange_suffixes = {
-        "NSE": ".NS",
-        "BSE": ".BO",
-    }
-
     url = "https://query2.finance.yahoo.com/v1/finance/search"
     headers = {"User-Agent": "Mozilla/5.0"}  # Avoid blocking
-    params = {"q": query, "quotesCount": 5, "country": "India"}  # Adjust for regional markets
+    params = {"q": query, "quotesCount": 5, "country": "India"}
 
     response = requests.get(url, headers=headers, params=params)
     data = response.json()
 
-    if data.get("quotes"):
-        # Extract symbols and names
-        tickers = [quote["symbol"] for quote in data["quotes"]]
-        names = [quote["longname"] or quote["shortname"] for quote in data["quotes"]]
-
-        # Fuzzy match the query with company names
-        best_match = process.extractOne(query, names)
-        if best_match:
-            index = names.index(best_match[0])
-            resolved_ticker = tickers[index]
-
-            # Ensure the exchange suffix is only added if not already present
-            for exchange in exchanges:
-                if not resolved_ticker.endswith(exchange_suffixes[exchange]):
-                    resolved_ticker += exchange_suffixes[exchange]
-                    break
-            return resolved_ticker
-        else:
-            # Default to first result
-            resolved_ticker = tickers[0]
-            for exchange in exchanges:
-                if not resolved_ticker.endswith(exchange_suffixes[exchange]):
-                    resolved_ticker += exchange_suffixes[exchange]
-                    break
-            return resolved_ticker
-    else:
+    if not data.get("quotes"):
         raise ValueError(f"No ticker found for: {query}")
+
+    # Extract quotes data
+    quotes = data["quotes"]
+    tickers = [quote["symbol"] for quote in quotes]
+    names = [quote.get("longname") or quote.get("shortname", "") for quote in quotes]
+
+    # Fuzzy match the query with company names
+    best_match, score = process.extractOne(query, names)
+    if not best_match:
+        raise ValueError(f"No matching ticker found for: {query}")
+
+    index = names.index(best_match)
+    best_quote = quotes[index]
+    resolved_ticker = best_quote["symbol"]
+    exchange_code = best_quote.get("exchange", "").upper()
+
+    # Map exchange codes to suffixes
+    exchange_suffix_map = {
+        "NSI": ".NS",  # NSE
+        "BOM": ".BO",  # BSE
+        "BSE": ".BO",
+        "NSE": ".NS",
+    }
+    suffix = exchange_suffix_map.get(exchange_code, ".NS")  # Default to NSE
+
+    # Append suffix only if not already present
+    if not resolved_ticker.endswith(suffix):
+        resolved_ticker += suffix
+
+    return resolved_ticker
 
 def fetch_articles(query):
     try:
@@ -190,53 +189,41 @@ def analyze_article_sentiment(article):
     return article
 
 def fetch_yfinance_data(ticker):
-    """Enhanced Yahoo Finance data fetching with technical analysis and fallback for multiple exchanges"""
-    exchanges = ["NSE", "BSE"]
-    exchange_suffixes = {
-        "NSE": ".NS",
-        "BSE": ".BO",
-    }
+    """Enhanced Yahoo Finance data fetching with technical analysis"""
+    try:
+        logging.info(f"Fetching Yahoo Finance data for: {ticker}")
+        stock = yf.Ticker(ticker)
+        history = stock.history(period="1y", interval="1d")
 
-    for exchange in exchanges:
-        try:
-            logging.info(f"Fetching Yahoo Finance data for: {ticker}{exchange_suffixes[exchange]}")
-            stock = yf.Ticker(f"{ticker}{exchange_suffixes[exchange]}")
+        if history.empty:
+            logging.error(f"No data found for {ticker}")
+            return {"error": f"No data found for {ticker}"}
 
-            # Get historical data for technical analysis
-            history = stock.history(period="1y", interval="1d")
+        # Calculate technical indicators
+        ta_data = calculate_technical_indicators(history)
 
-            if history.empty:
-                logging.error(f"No data found for {ticker}{exchange_suffixes[exchange]}, trying next exchange")
-                continue
+        # Current price data
+        current_price = history['Close'].iloc[-1]
+        prev_close = history['Close'].iloc[-2] if len(history) > 1 else 0
+        price_change = current_price - prev_close
+        percent_change = (price_change / prev_close) * 100 if prev_close != 0 else 0
 
-            # Calculate technical indicators
-            ta_data = calculate_technical_indicators(history)
+        # Generate price chart
+        chart = generate_price_chart(history[-120:])  # Last 120 days
 
-            # Current price data
-            current_price = history['Close'].iloc[-1]
-            prev_close = history['Close'].iloc[-2] if len(history) > 1 else 0
-            price_change = current_price - prev_close
-            percent_change = (price_change / prev_close) * 100 if prev_close != 0 else 0
+        return {
+            'current_price': current_price,
+            'price_change': price_change,
+            'percent_change': percent_change,
+            'chart': chart,
+            'technical_indicators': ta_data,
+            'fundamentals': stock.info
+        }
 
-            # Generate price chart
-            chart = generate_price_chart(history[-120:])  # Last 120 days
-
-            return {
-                'current_price': current_price,
-                'price_change': price_change,
-                'percent_change': percent_change,
-                'chart': chart,
-                'technical_indicators': ta_data,
-                'fundamentals': stock.info
-            }
-
-        except Exception as e:
-            logging.error(f"Error fetching Yahoo Finance data for {ticker}{exchange_suffixes[exchange]}: {str(e)}")
-            continue
-
-    logging.error(f"Failed to fetch data for {ticker} from all exchanges")
-    return {"error": f"Failed to fetch data for {ticker} from all exchanges"}
-
+    except Exception as e:
+        logging.error(f"Error fetching Yahoo Finance data for {ticker}: {str(e)}")
+        return {"error": f"Failed to fetch data for {ticker}: {str(e)}"}
+    
 def time_weighted_sentiment(articles):
     """Apply time-based weighting to sentiment scores"""
     now = datetime.now()
