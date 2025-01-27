@@ -244,24 +244,62 @@ def _format_number(num):
 
 def convert_to_dataframe(analyzed_articles):
     df = pd.DataFrame(analyzed_articles)
-    df["Title"] = df.apply(
-        lambda row: f'<a href="{row["link"]}" target="_blank">{row["title"]}</a>',
-        axis=1,
-    )
-    df["Description"] = df["desc"]
-    df["Date"] = df["date"]
-
+    
     def sentiment_badge(sentiment):
         colors = {
-            "negative": "red",
-            "neutral": "gray",
-            "positive": "green",
+            "negative": "#ef4444",
+            "neutral": "#64748b",
+            "positive": "#22c55e",
         }
         color = colors.get(sentiment, "grey")
-        return f'<span style="background-color: {color}; color: white; padding: 2px 6px; border-radius: 4px;">{sentiment}</span>'
+        return (
+            f'<div style="display: inline-flex; align-items: center; gap: 0.5rem;">'
+            f'<div style="width: 0.75rem; height: 0.75rem; background-color: {color}; border-radius: 50%;"></div>'
+            f'<span style="text-transform: capitalize; font-weight: 500; color: {color}">{sentiment}</span>'
+            f'</div>'
+        )
 
-    df["Sentiment"] = df["sentiment"].apply(lambda x: sentiment_badge(x["label"]))
-    return df[["Sentiment", "Title", "Description", "Date"]]
+    df["Sentiment"] = df["sentiment"].apply(lambda x: sentiment_badge(x["label"].lower()))
+    df["Title"] = df.apply(
+        lambda row: f'<a href="{row["link"]}" target="_blank" style="text-decoration: none; color: #2563eb;">{row["title"]}</a>',
+        axis=1,
+    )
+    df["Description"] = df["desc"].apply(lambda x: f'<div style="font-size: 0.9rem; color: #4b5563;">{x}</div>')
+    df["Date"] = df["date"].apply(lambda x: f'<div style="font-size: 0.8rem; color: #6b7280;">{x}</div>')
+
+    # Convert to HTML table
+    html_table = df[["Sentiment", "Title", "Description", "Date"]].to_html(
+        escape=False, 
+        index=False,
+        border=0,
+        classes="gradio-table",
+        justify="start"
+    )
+    
+    # Add custom styling
+    styled_html = f"""
+    <style>
+    .gradio-table {{
+        width: 100%;
+        border-collapse: collapse;
+    }}
+    .gradio-table th {{
+        text-align: left;
+        padding: 0.75rem;
+        background-color: #f8fafc;
+        border-bottom: 2px solid #e2e8f0;
+    }}
+    .gradio-table td {{
+        padding: 0.75rem;
+        border-bottom: 1px solid #f1f5f9;
+    }}
+    .gradio-table tr:hover td {{
+        background-color: #f8fafc;
+    }}
+    </style>
+    {html_table}
+    """
+    return styled_html
 
 def generate_stock_recommendation(articles, finance_data):
     """Enhanced recommendation system with technical analysis"""
@@ -358,7 +396,7 @@ def analyze_asset_sentiment(asset_input):
             None
         )
         
-# Update Gradio interface with new components
+# Update the Gradio interface (change the output component type)
 with gr.Blocks(theme=gr.themes.Default()) as iface:
     gr.Markdown("# Advanced Trading Analytics Suite")
     
@@ -372,9 +410,8 @@ with gr.Blocks(theme=gr.themes.Default()) as iface:
     
     with gr.Tabs():
         with gr.TabItem("Sentiment Analysis"):
-            articles_output = gr.Dataframe(render=False)  # Temporary hidden
-            gr.Markdown("## News Sentiment Analysis", render=False)
-            articles_output.render()
+            gr.Markdown("## News Sentiment Analysis")
+            articles_output = gr.HTML(label="Analyzed News Articles")  # Changed to HTML component
 
         with gr.TabItem("Technical Analysis"):
             price_chart = gr.Plot(label="Price Analysis")
@@ -387,12 +424,11 @@ with gr.Blocks(theme=gr.themes.Default()) as iface:
                 interactive=False
             )
     
-    # Move the click handler inside the Blocks context
     analyze_btn.click(
         analyze_asset_sentiment,
         inputs=[input_asset],
         outputs=[articles_output, ta_json, recommendation_output, price_chart]
     )
-
+    
 logging.info("Launching enhanced Gradio interface")
 iface.queue().launch()
