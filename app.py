@@ -396,39 +396,104 @@ def analyze_asset_sentiment(asset_input):
             None
         )
         
-# Update the Gradio interface (change the output component type)
-with gr.Blocks(theme=gr.themes.Default()) as iface:
-    gr.Markdown("# Advanced Trading Analytics Suite")
-    
-    with gr.Row():
-        input_asset = gr.Textbox(
-            label="Asset Name/Ticker",
-            placeholder="Enter stock name or symbol...",
-            max_lines=1
-        )
-        analyze_btn = gr.Button("Analyze", variant="primary")
-    
-    with gr.Tabs():
-        with gr.TabItem("Sentiment Analysis"):
-            gr.Markdown("## News Sentiment Analysis")
-            articles_output = gr.HTML(label="Analyzed News Articles")  # Changed to HTML component
+# Update the Gradio interface with dark theme and improved UI
+custom_theme = gr.themes.Default(
+    primary_hue="emerald",
+    secondary_hue="emerald",
+    neutral_hue="slate",
+    font=[gr.themes.GoogleFont("Inter")],
+).set(
+    body_background_fill='*neutral_950',
+    button_primary_background_fill='linear-gradient(90deg, #059669 0%, #10b981 100%)',
+    button_primary_text_color='white',
+    block_background_fill='*neutral_900',
+    block_label_text_color='*primary_300',
+    block_title_text_color='*primary_300',
+    input_background_fill='*neutral_800',
+)
 
-        with gr.TabItem("Technical Analysis"):
-            price_chart = gr.Plot(label="Price Analysis")
-            ta_json = gr.JSON(label="Technical Indicators")
-
-        with gr.TabItem("Recommendation"):
-            recommendation_output = gr.Textbox(
-                lines=8,
-                label="Analysis Summary",
-                interactive=False
+with gr.Blocks(theme=custom_theme, css="footer {visibility: hidden}") as iface:
+    gr.Markdown("""
+    # 📈 Advanced Trading Analytics Suite
+    *AI-powered market analysis with real-time sentiment and technical indicators*
+    """)
+    
+    with gr.Row(variant="panel"):
+        with gr.Column(scale=3):
+            input_asset = gr.Textbox(
+                label="🔍 Search Asset",
+                placeholder="Enter stock name or symbol (e.g., Apple or AAPL)...",
+                max_lines=1,
+                container=False
             )
+        with gr.Column(scale=1):
+            analyze_btn = gr.Button("Analyze Now →", variant="primary", size="lg")
+    
+    with gr.Tabs(selected=0):
+        with gr.TabItem("📰 News Sentiment", id=1):
+            gr.Markdown("### 📊 Sentiment Analysis from Latest News")
+            with gr.Row():
+                sentiment_summary = gr.Label(label="Overall Sentiment", 
+                                           value={"Positive": 0, "Neutral": 0, "Negative": 0},
+                                           num_top_classes=3)
+            articles_output = gr.HTML(label="Latest News Analysis")
+
+        with gr.TabItem("📉 Technical Analysis", id=2):
+            with gr.Row():
+                with gr.Column(scale=2):
+                    gr.Markdown("### Price Chart")
+                    price_chart = gr.Plot(label="Technical Analysis")
+                with gr.Column(scale=1):
+                    gr.Markdown("### Key Indicators")
+                    ta_metrics = gr.DataFrame(
+                        headers=["Indicator", "Value"],
+                        datatype=["str", "number"],
+                        interactive=False,
+                        label="Technical Metrics"
+                    )
+        
+        with gr.TabItem("💡 Recommendation", id=3):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    gr.Markdown("### Trading Recommendation")
+                    recommendation_output = gr.Markdown()
+                with gr.Column(scale=1):
+                    gr.Markdown("### Risk Analysis")
+                    risk_indicators = gr.DataFrame(
+                        headers=["Risk Factor", "Severity"],
+                        datatype=["str", "str"],
+                        interactive=False
+                    )
+
+    # Add loading animation
+    analyze_btn.click(
+        lambda: gr.Loading(loader_args={
+            'text': '🔮 Analyzing market data...',
+            'spinner_type': 'dots',
+            'timeout': 10
+        }), 
+        outputs=[]
+    )
     
     analyze_btn.click(
         analyze_asset_sentiment,
         inputs=[input_asset],
-        outputs=[articles_output, ta_json, recommendation_output, price_chart]
+        outputs=[
+            articles_output, 
+            ta_metrics, 
+            recommendation_output, 
+            price_chart
+        ]
     )
+    
+    # Additional callback for sentiment summary
+    def update_sentiment_summary(articles):
+        sentiments = [a['sentiment']['label'].lower() for a in articles]
+        return {
+            "Positive": sentiments.count('positive'),
+            "Neutral": sentiments.count('neutral'),
+            "Negative": sentiments.count('negative')
+        }
     
 logging.info("Launching enhanced Gradio interface")
 iface.queue().launch()

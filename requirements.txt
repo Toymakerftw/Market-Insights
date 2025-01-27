@@ -8,3 +8,4 @@ yfinance
 fuzzywuzzy
 matplotlib
 numpy
+python-Levenshtein
