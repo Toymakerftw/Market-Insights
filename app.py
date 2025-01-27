@@ -2,12 +2,15 @@ import logging
 import gradio as gr
 import pandas as pd
 import torch
+import numpy as np
 from GoogleNews import GoogleNews
 from transformers import pipeline
 import yfinance as yf
 import requests
 from fuzzywuzzy import process
 import statistics
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
 
 # Set up logging
 logging.basicConfig(
@@ -27,14 +30,93 @@ sentiment_analyzer = pipeline(
 )
 logging.info("Model initialized successfully")
 
-# Exchange suffixes for Yahoo Finance
+# Technical Analysis Parameters
+TA_CONFIG = {
+    'rsi_window': 14,
+    'macd_fast': 12,
+    'macd_slow': 26,
+    'macd_signal': 9,
+    'bollinger_window': 20,
+    'sma_windows': [20, 50, 200],
+    'ema_windows': [12, 26],
+    'volatility_window': 30
+}
+
 EXCHANGE_SUFFIXES = {
     "NSE": ".NS",
     "BSE": ".BO",
     "NYSE": "",
     "NASDAQ": "",
-    # Add more exchanges as needed
 }
+
+def calculate_technical_indicators(history):
+    """Calculate various technical indicators from historical price data"""
+    ta_results = {}
+    
+    # RSI
+    delta = history['Close'].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    
+    avg_gain = gain.rolling(TA_CONFIG['rsi_window']).mean()
+    avg_loss = loss.rolling(TA_CONFIG['rsi_window']).mean()
+    rs = avg_gain / avg_loss
+    ta_results['rsi'] = 100 - (100 / (1 + rs)).iloc[-1]
+    
+    # MACD
+    ema_fast = history['Close'].ewm(span=TA_CONFIG['macd_fast'], adjust=False).mean()
+    ema_slow = history['Close'].ewm(span=TA_CONFIG['macd_slow'], adjust=False).mean()
+    macd = ema_fast - ema_slow
+    signal = macd.ewm(span=TA_CONFIG['macd_signal'], adjust=False).mean()
+    ta_results['macd'] = macd.iloc[-1]
+    ta_results['macd_signal'] = signal.iloc[-1]
+    
+    # Bollinger Bands
+    sma = history['Close'].rolling(TA_CONFIG['bollinger_window']).mean()
+    std = history['Close'].rolling(TA_CONFIG['bollinger_window']).std()
+    ta_results['bollinger_upper'] = (sma + 2 * std).iloc[-1]
+    ta_results['bollinger_lower'] = (sma - 2 * std).iloc[-1]
+    
+    # Moving Averages
+    for window in TA_CONFIG['sma_windows']:
+        ta_results[f'sma_{window}'] = history['Close'].rolling(window).mean().iloc[-1]
+    for window in TA_CONFIG['ema_windows']:
+        ta_results[f'ema_{window}'] = history['Close'].ewm(span=window, adjust=False).mean().iloc[-1]
+    
+    # Volatility
+    returns = history['Close'].pct_change().dropna()
+    ta_results['volatility_30d'] = returns.rolling(TA_CONFIG['volatility_window']).std().iloc[-1] * np.sqrt(252)
+    
+    return ta_results
+
+def generate_price_chart(history):
+    """Generate interactive price chart with technical indicators"""
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+    
+    # Price and Moving Averages
+    history['Close'].plot(ax=ax1, label='Price')
+    for window in TA_CONFIG['sma_windows']:
+        history['Close'].rolling(window).mean().plot(ax=ax1, label=f'SMA {window}')
+    ax1.set_title('Price and Moving Averages')
+    ax1.legend()
+    
+    # RSI
+    delta = history['Close'].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(TA_CONFIG['rsi_window']).mean()
+    avg_loss = loss.rolling(TA_CONFIG['rsi_window']).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    rsi.plot(ax=ax2, label='RSI')
+    ax2.axhline(70, color='red', linestyle='--')
+    ax2.axhline(30, color='green', linestyle='--')
+    ax2.set_title('Relative Strength Index (RSI)')
+    ax2.legend()
+    
+    plt.tight_layout()
+    return fig
 
 def resolve_ticker_symbol(query: str, exchange: str = "NSE") -> str:
     """
@@ -96,64 +178,57 @@ def analyze_article_sentiment(article):
     return article
 
 def fetch_yfinance_data(ticker):
-    """Enhanced Yahoo Finance data fetching using official yfinance patterns"""
+    """Enhanced Yahoo Finance data fetching with technical analysis"""
     try:
         logging.info(f"Fetching Yahoo Finance data for: {ticker}")
         stock = yf.Ticker(ticker)
         
-        # Get market state and current session prices
-        info = stock.info
-        history = stock.history(period="2d", interval="1d")  # Get 2 days for change calculation
+        # Get historical data for technical analysis
+        history = stock.history(period="1y", interval="1d")
         
-        # Base price information
-        current_price = info.get('currentPrice', 
-                              info.get('regularMarketPrice',
-                              info.get('ask', 'N/A')))
+        # Calculate technical indicators
+        ta_data = calculate_technical_indicators(history) if not history.empty else {}
         
-        # Calculate price change using proper market session data
-        if not history.empty and len(history) > 1:
-            prev_close = history.iloc[-2]['Close']
-            current_close = history.iloc[-1]['Close']
-            change = current_close - prev_close
-            percent_change = (change / prev_close) * 100
-        else:
-            change = info.get('regularMarketChange', 'N/A')
-            percent_change = info.get('regularMarketChangePercent', 'N/A')
+        # Current price data
+        current_price = history['Close'].iloc[-1] if not history.empty else 0
+        prev_close = history['Close'].iloc[-2] if len(history) > 1 else 0
+        price_change = current_price - prev_close
+        percent_change = (price_change / prev_close) * 100 if prev_close != 0 else 0
 
-        # Format market cap with proper suffixes
-        market_cap = info.get('marketCap')
-        if market_cap and market_cap != 'N/A':
-            market_cap = f"${_format_number(market_cap)}"
-
+        # Generate price chart
+        chart = generate_price_chart(history[-120:])  # Last 120 days
+        
         return {
-            # Core pricing
-            'price': f"{current_price:.2f}" if isinstance(current_price, float) else current_price,
-            'currency': info.get('currency', 'USD'),
-            'previous_close': f"{prev_close:.2f}" if 'prev_close' in locals() else 'N/A',
-            
-            # Price movements
-            'change': f"{change:.2f}" if isinstance(change, float) else change,
-            'percent_change': f"{percent_change:.2f}%" if isinstance(percent_change, float) else percent_change,
-            'day_range': f"{info.get('dayLow', 'N/A')} - {info.get('dayHigh', 'N/A')}",
-            
-            # Market data
-            'market_cap': market_cap,
-            'volume': _format_number(info.get('volume', 'N/A')),
-            'pe_ratio': info.get('trailingPE', info.get('forwardPE', 'N/A')),
-            '52_week_range': f"{info.get('fiftyTwoWeekLow', 'N/A')} - {info.get('fiftyTwoWeekHigh', 'N/A')}",
-            
-            # Additional fundamentals
-            'dividend_yield': f"{info.get('dividendYield', 0) * 100:.2f}%" if info.get('dividendYield') else 'N/A',
-            'beta': info.get('beta', 'N/A'),
-            
-            # Market state
-            'market_state': info.get('marketState', 'CLOSED').title(),
-            'exchange': info.get('exchangeName', 'N/A')
+            'current_price': current_price,
+            'price_change': price_change,
+            'percent_change': percent_change,
+            'chart': chart,
+            'technical_indicators': ta_data,
+            'fundamentals': stock.info
         }
         
     except Exception as e:
         logging.error(f"Error fetching Yahoo Finance data: {str(e)}")
-        return {"error": f"Failed to fetch data for {ticker}: {str(e)}"}
+        return {"error": str(e)}
+
+def time_weighted_sentiment(articles):
+    """Apply time-based weighting to sentiment scores"""
+    now = datetime.now()
+    weighted_scores = []
+    
+    for article in articles:
+        try:
+            article_date = datetime.strptime(article['date'], '%Y-%m-%d %H:%M:%S')
+            days_old = (now - article_date).days
+            weight = max(0, 1 - (days_old / 7))  # Linear decay over 7 days
+        except:
+            weight = 0.5  # Default weight if date parsing fails
+            
+        sentiment = article['sentiment']['label']
+        score = 1 if sentiment == 'positive' else -1 if sentiment == 'negative' else 0
+        weighted_scores.append(score * weight)
+    
+    return weighted_scores
 
 def _format_number(num):
     """Helper to format large numbers with suffixes"""
@@ -187,86 +262,60 @@ def convert_to_dataframe(analyzed_articles):
     return df[["Sentiment", "Title", "Description", "Date"]]
 
 def generate_stock_recommendation(articles, finance_data):
-    """
-    Generate a stock recommendation based on sentiment analysis and financial indicators
-    """
-    # Extract sentiment from articles
-    if not articles or len(articles) == 0:
-        return "Insufficient data for recommendation"
+    """Enhanced recommendation system with technical analysis"""
+    # Time-weighted sentiment analysis
+    sentiment_scores = time_weighted_sentiment(articles)
+    positive_score = sum(s for s in sentiment_scores if s > 0)
+    negative_score = abs(sum(s for s in sentiment_scores if s < 0))
+    total_score = positive_score - negative_score
     
-    # Sentiment scoring
-    sentiment_labels = [article['sentiment']['label'] for article in articles]
-    sentiment_scores = {
-        'positive': sentiment_labels.count('positive'),
-        'negative': sentiment_labels.count('negative'),
-        'neutral': sentiment_labels.count('neutral')
-    }
-    
-    # Calculate sentiment ratio
-    total_articles = len(sentiment_labels)
-    sentiment_ratio = {
-        'positive': sentiment_scores['positive'] / total_articles * 100,
-        'negative': sentiment_scores['negative'] / total_articles * 100,
-        'neutral': sentiment_scores['neutral'] / total_articles * 100
-    }
-    
-    # Recommendation logic
-    recommendation = {
+    # Technical indicators
+    ta = finance_data.get('technical_indicators', {})
+    rec = {
         'recommendation': 'HOLD',
         'confidence': 'Medium',
-        'reasons': []
+        'reasons': [],
+        'risk_factors': []
     }
     
-    # Financial indicators
-    price_change = finance_data.get('percent_change', 0)
-    pe_ratio = finance_data.get('pe_ratio', 'N/A')
-    dividend_yield = finance_data.get('dividend_yield', 'N/A')
+    # Sentiment-based factors
+    if total_score > 3:
+        rec['recommendation'] = 'BUY'
+        rec['reasons'].append("Strong positive sentiment trend")
+    elif total_score < -3:
+        rec['recommendation'] = 'SELL'
+        rec['reasons'].append("Significant negative sentiment")
+        
+    # Technical analysis factors
+    if ta.get('rsi', 50) > 70:
+        rec['risk_factors'].append("RSI indicates overbought condition")
+    elif ta.get('rsi', 50) < 30:
+        rec['reasons'].append("RSI suggests oversold opportunity")
+        
+    if ta.get('macd', 0) > ta.get('macd_signal', 0):
+        rec['reasons'].append("Bullish MACD crossover")
+    else:
+        rec['risk_factors'].append("Bearish MACD trend")
+        
+    # Volatility analysis
+    if ta.get('volatility_30d', 0) > 0.4:
+        rec['risk_factors'].append("High volatility detected")
+        
+    # Combine factors
+    if len(rec['reasons']) > len(rec['risk_factors']):
+        rec['confidence'] = 'High'
+    elif len(rec['risk_factors']) > 2:
+        rec['recommendation'] = 'SELL' if rec['recommendation'] == 'HOLD' else rec['recommendation']
+        rec['confidence'] = 'Low'
+        
+    # Format output
+    output = f"Recommendation: {rec['recommendation']} ({rec['confidence']} Confidence)\n\n"
+    output += "Supporting Factors:\n" + "\n".join(f"- {r}" for r in rec['reasons']) + "\n\n"
+    output += "Risk Factors:\n" + "\n".join(f"- {r}" for r in rec['risk_factors']) + "\n\n"
+    output += f"Sentiment Score: {total_score:.2f}\n"
+    output += f"30-Day Volatility: {ta.get('volatility_30d', 0):.2%}"
     
-    # Sentiment-based recommendation
-    if sentiment_ratio['positive'] > 60:
-        recommendation['recommendation'] = 'BUY'
-        recommendation['confidence'] = 'High'
-        recommendation['reasons'].append("Predominantly positive news sentiment")
-    elif sentiment_ratio['negative'] > 60:
-        recommendation['recommendation'] = 'SELL'
-        recommendation['confidence'] = 'High'
-        recommendation['reasons'].append("Predominantly negative news sentiment")
-    
-    # Additional financial considerations
-    if isinstance(price_change, float):
-        if price_change > 2:
-            recommendation['reasons'].append(f"Strong positive price movement (+{price_change:.2f}%)")
-        elif price_change < -2:
-            recommendation['reasons'].append(f"Significant price decline ({price_change:.2f}%)")
-    
-    # PE Ratio consideration
-    if isinstance(pe_ratio, (int, float)):
-        if 0 < pe_ratio < 15:
-            recommendation['reasons'].append(f"Attractive PE Ratio ({pe_ratio:.2f})")
-        elif pe_ratio > 30:
-            recommendation['reasons'].append(f"High PE Ratio ({pe_ratio:.2f}) - potential overvaluation")
-    
-    # Dividend yield consideration
-    if isinstance(dividend_yield, str) and dividend_yield != 'N/A':
-        div_yield = float(dividend_yield.rstrip('%'))
-        if div_yield > 3:
-            recommendation['reasons'].append(f"Attractive dividend yield ({dividend_yield})")
-    
-    # Combine results
-    recommendation_text = f"""
-Recommendation: {recommendation['recommendation']}
-Confidence: {recommendation['confidence']}
-
-Reasons:
-{chr(10).join('- ' + reason for reason in recommendation['reasons'])}
-
-Sentiment Breakdown:
-- Positive Articles: {sentiment_ratio['positive']:.2f}%
-- Neutral Articles: {sentiment_ratio['neutral']:.2f}%
-- Negative Articles: {sentiment_ratio['negative']:.2f}%
-"""
-    
-    return recommendation_text
+    return output
 
 def analyze_asset_sentiment(asset_input):
     logging.info(f"Starting sentiment analysis for asset: {asset_input}")
@@ -286,6 +335,9 @@ def analyze_asset_sentiment(asset_input):
         # Fetch Yahoo Finance data
         logging.info("Fetching Yahoo Finance data")
         finance_data = fetch_yfinance_data(ticker)
+        
+        # Extract chart from finance data
+        price_chart = finance_data.pop('chart', None)
 
         # Generate stock recommendation
         logging.info("Generating stock recommendation")
@@ -294,71 +346,53 @@ def analyze_asset_sentiment(asset_input):
         logging.info("Sentiment analysis completed")
         return (
             convert_to_dataframe(analyzed_articles), 
-            finance_data, 
-            recommendation
+            finance_data,  # Financial data without chart
+            recommendation,
+            price_chart    # Chart as separate output
         )
     except ValueError as e:
         logging.error(f"Error resolving ticker: {str(e)}")
         raise gr.Error(f"Invalid input: {str(e)}")
-
-# Update Gradio interface to include recommendation output
-with gr.Blocks() as iface:
-    gr.Markdown("# Trading Asset Sentiment Analysis")
-    gr.Markdown(
-        "Enter the name of a trading asset, and I'll fetch recent articles, analyze their sentiment, and provide a stock recommendation!"
-    )
-
+    
+# Update Gradio interface with new components
+with gr.Blocks(theme=gr.themes.Default()) as iface:
+    gr.Markdown("# Advanced Trading Analytics Suite")
+    
     with gr.Row():
         input_asset = gr.Textbox(
-            label="Asset Name or Ticker Symbol",
-            lines=1,
-            placeholder="Enter the company name or ticker symbol (e.g., Kalyan Jewellers, AAPL, TSLA)...",
+            label="Asset Name/Ticker",
+            placeholder="Enter stock name or symbol...",
+            max_lines=1
         )
-
-    with gr.Row():
-        analyze_button = gr.Button("Analyze Sentiment", size="sm")
-
-    gr.Examples(
-        examples=[
-            "AAPL",
-            "TSLA",
-            "Kalyan Jewellers",
-            "BTC-USD"
-        ],
-        inputs=input_asset,
-    )
-
-    with gr.Row():
-        with gr.Column():
-            with gr.Blocks():
-                gr.Markdown("## Articles and Sentiment Analysis")
-                articles_output = gr.Dataframe(
-                    headers=["Sentiment", "Title", "Description", "Date"],
-                    datatype=["markdown", "html", "markdown", "markdown"],
-                    wrap=False,
-                )
-
-    with gr.Row():
-        with gr.Column():
-            with gr.Blocks():
-                gr.Markdown("## Financial Data")
-                finance_output = gr.JSON()
+        analyze_btn = gr.Button("Analyze", variant="primary")
+    
+    with gr.Tabs():
+        with gr.TabItem("Sentiment Analysis"):
+            gr.Markdown("## News Sentiment Analysis")
+            articles_output = gr.Dataframe(
+                headers=["Sentiment", "Title", "Description", "Date"],
+                datatype=["markdown", "html", "markdown", "markdown"]
+            )
+            
+        with gr.TabItem("Technical Analysis"):
+            gr.Markdown("## Technical Indicators")
+            with gr.Row():
+                price_chart = gr.Plot(label="Price Analysis")
+                ta_json = gr.JSON(label="Technical Indicators")
                 
-    with gr.Row():
-        with gr.Column():
-            with gr.Blocks():
-                gr.Markdown("## Stock Recommendation")
-                recommendation_output = gr.Textbox(
-                    label="Recommendation",
-                    lines=10,
-                    interactive=False
-                )
-
-    analyze_button.click(
+        with gr.TabItem("Recommendation"):
+            gr.Markdown("## Trading Recommendation")
+            recommendation_output = gr.Textbox(
+                lines=8,
+                label="Analysis Summary",
+                interactive=False
+            )
+    
+    analyze_btn.click(
         analyze_asset_sentiment,
         inputs=[input_asset],
-        outputs=[articles_output, finance_output, recommendation_output],
+        outputs=[articles_output, ta_json, recommendation_output, price_chart]
     )
 
-logging.info("Launching Gradio interface")
+logging.info("Launching enhanced Gradio interface")
 iface.queue().launch()

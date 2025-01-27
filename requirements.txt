@@ -6,3 +6,5 @@ sentencepiece==0.2.0
 GoogleNews==1.6.14
 yfinance
 fuzzywuzzy
+matplotlib
+numpy
